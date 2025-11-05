@@ -1,37 +1,44 @@
 # TAK Server 5.5 Docker Installation Guide
 
-**Complete guide for running TAK Server 5.5 using official Docker distribution**
+**Complete guide for running TAK Server 5.5 using Docker**
 
-*Tested on: Ubuntu 24.04.3 LTS (Noble Numbat) with Docker 24.0+*
+*Tested on: Ubuntu 24.04.3 LTS, macOS 14+ with Docker 24.0+*
 
 ---
 
 ## IMPORTANT - READ FIRST!
 
-### Use Official TAK Server Docker Distribution
+### Official TAK Server Package Required
 
-**Download the official Docker distribution from tak.gov!**
+**Download the official TAK Server Docker package from tak.gov:**
 
-- TAK Server provides pre-configured Docker images and docker-compose setup
-- Do NOT build custom Docker images
-- Download `takserver-docker-5.5-RELEASE58.tar.gz` from https://tak.gov
-- The official Docker distribution includes everything pre-configured
+- Package: `takserver-docker-5.5-RELEASE-58.tar.gz`
+- Source: https://tak.gov (requires account)
+- Size: ~550MB
 
-### What You Get from tak.gov
+⚠️ **Important Note:** The official package contains Dockerfiles and TAK Server binaries but **does NOT** include `docker-compose.yml` or `.env` files. You will create these files using the templates provided in this guide.
 
-The official Docker distribution includes:
-- Pre-built TAK Server Docker image
-- Pre-configured `docker-compose.yml`
-- PostgreSQL 15 configuration
-- Nginx reverse proxy configuration
-- Certificate generation scripts
-- Ready-to-run setup
+### What the Official Package Contains
+
+```
+takserver-docker-5.5-RELEASE-58/
+├── docker/
+│   ├── Dockerfile.takserver
+│   └── Dockerfile.takserver-db
+└── tak/
+    ├── takserver.war (main application)
+    ├── takserver-pm.jar
+    ├── takserver-retention.jar
+    ├── certs/ (certificate generation scripts)
+    ├── db-utils/ (database utilities)
+    └── [configuration files]
+```
 
 ### Prerequisites
 
 - Docker Engine 20.10+ or Docker Desktop
 - Docker Compose 2.0+
-- Minimum 8GB RAM (12GB+ recommended)
+- Minimum 8GB RAM (16GB+ recommended)
 - 40GB+ disk space
 - Downloaded TAK Server Docker package from tak.gov
 
@@ -40,16 +47,17 @@ The official Docker distribution includes:
 ## Table of Contents
 
 1. [Install Docker](#install-docker)
-2. [Download TAK Server Docker Package](#download-tak-server-docker-package)
+2. [Download TAK Server Package](#download-tak-server-package)
 3. [Extract and Setup](#extract-and-setup)
-4. [Configure Environment](#configure-environment)
-5. [Start TAK Server](#start-tak-server)
+4. [Create docker-compose.yml](#create-docker-composeyml)
+5. [Create Environment File](#create-environment-file)
 6. [Generate Certificates](#generate-certificates)
-7. [Access Web Interface](#access-web-interface)
-8. [Verify Server Status](#verify-server-status)
-9. [Managing Containers](#managing-containers)
-10. [Troubleshooting](#troubleshooting)
-11. [Backup and Restore](#backup-and-restore)
+7. [Configure Database Password](#configure-database-password)
+8. [Build and Start Services](#build-and-start-services)
+9. [Access Web Interface](#access-web-interface)
+10. [Managing Containers](#managing-containers)
+11. [Troubleshooting](#troubleshooting)
+12. [Backup and Restore](#backup-and-restore)
 
 ---
 
@@ -62,7 +70,7 @@ The official Docker distribution includes:
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 
-# Add your user to docker group (optional, to run docker without sudo)
+# Add your user to docker group
 sudo usermod -aG docker $USER
 newgrp docker
 
@@ -71,349 +79,338 @@ docker --version
 docker compose version
 ```
 
-Expected output:
-```
-Docker version 24.0.x
-Docker Compose version 2.x.x
-```
+### For macOS
+
+Install Docker Desktop from https://www.docker.com/products/docker-desktop/
 
 ---
 
-## Download TAK Server Docker Package
+## Download TAK Server Package
 
-### Register and Download from tak.gov
+1. Go to https://tak.gov and create/login to your account
+2. Navigate to Downloads section
+3. Download: `takserver-docker-5.5-RELEASE-58.tar.gz`
 
-1. Go to https://tak.gov
-2. Create an account or login
-3. Navigate to Downloads section
-4. Download **TAK Server Docker Distribution**:
-   - File: `takserver-docker-5.5-RELEASE58.tar.gz`
-   - Size: ~1-2GB
-
-### Verify Download
-
+Verify download:
 ```bash
-# Check file exists
 ls -lh ~/Downloads/takserver-docker-*.tar.gz
-
-# Optional: Verify checksum (if provided by tak.gov)
-sha256sum ~/Downloads/takserver-docker-5.5-RELEASE58.tar.gz
 ```
 
 ---
 
 ## Extract and Setup
 
-### Create Working Directory
-
 ```bash
-# Create directory for TAK Server
-mkdir -p ~/tak-server-docker
-cd ~/tak-server-docker
-
 # Extract the package
-tar -xzf ~/Downloads/takserver-docker-5.5-RELEASE58.tar.gz
+cd ~/Downloads
+tar -xzf takserver-docker-5.5-RELEASE-58.tar.gz
+cd takserver-docker-5.5-RELEASE-58
 
-# The extraction creates a directory structure
+# Verify contents
 ls -la
 ```
 
-Expected directory structure:
-```
-tak-server-docker/
-├── docker-compose.yml
-├── tak/
-│   ├── Dockerfile
-│   └── ...
-├── certs/
-├── db-data/
-└── README.md
-```
-
-### Review Official Documentation
-
-```bash
-# Read the official README
-cat README.md
-
-# Review the docker-compose configuration
-cat docker-compose.yml
-```
+You should see `docker/` and `tak/` directories.
 
 ---
 
-## Configure Environment
+## Create docker-compose.yml
 
-### Create Environment File
-
-The official distribution typically includes a `.env.example` file:
+The official package does not include a docker-compose.yml file. Create one:
 
 ```bash
-# Copy example environment file
-cp .env.example .env
+nano docker-compose.yml
+```
 
-# Edit environment variables
+**Copy and paste this configuration:**
+
+```yaml
+version: '3.8'
+
+services:
+  tak-database:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.takserver-db
+    container_name: tak-database
+    hostname: tak-database
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atakatak}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: cot
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./tak:/opt/tak
+    networks:
+      - tak-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  takserver:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.takserver
+    container_name: takserver
+    hostname: takserver
+    depends_on:
+      tak-database:
+        condition: service_healthy
+    environment:
+      DB_HOST: tak-database
+      DB_PORT: 5432
+      DB_NAME: cot
+      DB_USERNAME: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-atakatak}
+      CONFIG_MAX_HEAP: ${CONFIG_MAX_HEAP:-256}
+      MESSAGING_MAX_HEAP: ${MESSAGING_MAX_HEAP:-512}
+      API_MAX_HEAP: ${API_MAX_HEAP:-512}
+      RETENTION_MAX_HEAP: ${RETENTION_MAX_HEAP:-256}
+      PLUGIN_MANAGER_MAX_HEAP: ${PLUGIN_MANAGER_MAX_HEAP:-256}
+    volumes:
+      - ./tak:/opt/tak
+    ports:
+      - "8443:8443"   # HTTPS API
+      - "8089:8089"   # TLS client connections
+      - "9000:9000"   # Federation
+      - "9001:9001"   # Federation
+      - "8444:8444"   # Additional
+      - "8446:8446"   # Certificate enrollment
+    networks:
+      - tak-network
+    restart: unless-stopped
+
+volumes:
+  db-data:
+    driver: local
+
+networks:
+  tak-network:
+    driver: bridge
+```
+
+Save and exit (Ctrl+O, Enter, Ctrl+X in nano).
+
+---
+
+## Create Environment File
+
+Create a `.env` file for configuration:
+
+```bash
 nano .env
 ```
 
-**Key environment variables to set:**
+**Add this content:**
 
 ```bash
-# PostgreSQL configuration
-POSTGRES_PASSWORD=your_secure_password_here
+# Database Configuration
+POSTGRES_PASSWORD=atakatak
 
-# TAK Server hostname/IP
-TAK_SERVER_HOST=your_server_ip_or_hostname
+# TAK Server Memory Configuration (in MB)
+# Adjust based on your system resources
+CONFIG_MAX_HEAP=256
+MESSAGING_MAX_HEAP=512
+API_MAX_HEAP=512
+RETENTION_MAX_HEAP=256
+PLUGIN_MANAGER_MAX_HEAP=256
 
-# Certificate organization details
-CERT_COUNTRY=US
-CERT_STATE=YourState
-CERT_CITY=YourCity
-CERT_ORG=YourOrganization
-CERT_OU=TAKServer
+# Certificate Configuration
+CERT_STATE=California
+CERT_CITY=Sacramento
+CERT_ORGANIZATION=YourOrganization
+CERT_ORGANIZATIONAL_UNIT=TAKServer
 ```
 
-**IMPORTANT**: Change `your_secure_password_here` to a strong password!
+**Important:** For production, change `POSTGRES_PASSWORD` to a strong password.
 
-### Secure Environment File
-
+Secure the file:
 ```bash
-# Restrict permissions on .env file
 chmod 600 .env
-```
-
----
-
-## Start TAK Server
-
-### First-Time Initialization
-
-When running TAK Server for the first time:
-
-```bash
-cd ~/tak-server-docker
-
-# Pull required images (if not included in tar)
-docker compose pull
-
-# Start PostgreSQL first
-docker compose up -d db
-
-# Wait for database to be ready (30 seconds)
-sleep 30
-
-# Check database is healthy
-docker compose ps
-
-# Initialize TAK Server database
-docker compose run --rm tak-server /opt/tak/db-utils/takserver-setup-db.sh
-
-# Start all services
-docker compose up -d
-```
-
-### Check Startup
-
-```bash
-# View all containers
-docker compose ps
-
-# Follow TAK Server logs
-docker compose logs -f tak-server
-
-# Wait for startup to complete (look for "Server startup complete" message)
-```
-
-Expected output:
-```
-NAME                STATUS              PORTS
-tak-postgres        Up (healthy)        5432/tcp
-tak-server          Up (healthy)        8089/tcp, 8443/tcp, 8444/tcp, 8446/tcp
 ```
 
 ---
 
 ## Generate Certificates
 
-Certificates are required for TAK Server authentication.
-
-### Generate Root CA
+Create a setup script to generate certificates:
 
 ```bash
-# Access the TAK Server container
-docker exec -it tak-server bash
-
-# Navigate to certificate directory
-cd /opt/tak/certs
-
-# Set certificate details (if not already in environment)
-export STATE="California"
-export CITY="SanFrancisco"
-export ORGANIZATIONAL_UNIT="TAKServer"
-
-# Generate root CA
-./makeRootCa.sh
-
-# Exit on success
+nano setup.sh
 ```
 
-### Generate Server Certificate
+**Add this content:**
 
 ```bash
-# Still inside the container
-cd /opt/tak/certs
+#!/bin/bash
+set -e
 
-# Generate server certificate (use your server's hostname or IP)
-./makeCert.sh server takserver
+echo "TAK Server 5.5 Certificate Generation"
+echo "====================================="
 
-# Verify certificate was created
-ls -la files/ | grep takserver
-```
+# Load environment variables
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
 
-### Generate Admin Certificate
+# Check if certificates already exist
+if [ -d "tak/certs/files" ] && [ -f "tak/certs/files/ca.pem" ]; then
+    echo "✓ Certificates already exist"
+    exit 0
+fi
 
-```bash
-# Generate admin certificate for web UI access
+# Set certificate environment variables
+export STATE=${CERT_STATE:-California}
+export CITY=${CERT_CITY:-Sacramento}
+export ORGANIZATION=${CERT_ORGANIZATION:-TAK}
+export ORGANIZATIONAL_UNIT=${CERT_ORGANIZATIONAL_UNIT:-TAK}
+
+# Generate certificates
+cd tak/certs
+
+echo "Creating Root CA..."
+./makeRootCa.sh --ca-name takserver
+
+echo "Creating server certificate..."
+HOSTNAME=$(hostname -f 2>/dev/null || hostname)
+./makeCert.sh server "$HOSTNAME"
+
+echo "Creating admin client certificate..."
 ./makeCert.sh client admin
 
-# Generate additional user certificates as needed
-./makeCert.sh client user1
-./makeCert.sh client user2
+cd ../..
 
-# Exit container
-exit
+echo ""
+echo "✓ Certificate generation complete!"
+echo ""
+echo "Certificates location: tak/certs/files/"
+echo "Admin certificate: tak/certs/files/admin.p12"
+echo "Password: atakatak"
 ```
 
-### Export Certificates from Container
-
+Make it executable and run:
 ```bash
-# Create local certs directory
-mkdir -p ~/tak-certs
-
-# Copy certificates from container to host
-docker cp tak-server:/opt/tak/certs/files/admin.p12 ~/tak-certs/
-docker cp tak-server:/opt/tak/certs/files/user1.p12 ~/tak-certs/
-docker cp tak-server:/opt/tak/certs/files/ca.pem ~/tak-certs/
-
-# Set proper permissions
-chmod 644 ~/tak-certs/*.p12
-
-# List certificates
-ls -lh ~/tak-certs/
+chmod +x setup.sh
+./setup.sh
 ```
 
-The default certificate password is: **atakatak**
+Verify certificates were created:
+```bash
+ls -la tak/certs/files/
+```
 
-### Restart TAK Server
+You should see `admin.p12`, `ca.pem`, and server certificates.
 
-After generating certificates, restart the server:
+---
+
+## Configure Database Password
+
+⚠️ **Critical Step:** Update the CoreConfig.xml file with your database password.
 
 ```bash
-docker compose restart tak-server
+nano tak/CoreConfig.xml
+```
 
-# Wait for restart and check logs
-docker compose logs -f tak-server
+Find this line (around line 16):
+```xml
+<connection url="jdbc:postgresql://tak-database:5432/cot" username="martiuser" password=""/>
+```
+
+**Change it to** (use the same password as in your `.env` file):
+```xml
+<connection url="jdbc:postgresql://tak-database:5432/cot" username="martiuser" password="atakatak"/>
+```
+
+Save and exit.
+
+---
+
+## Build and Start Services
+
+### Build Docker Images
+
+This step downloads PostgreSQL 15, Java 17, and builds the containers (5-10 minutes):
+
+```bash
+docker compose build
+```
+
+### Start Services
+
+```bash
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs -f
+```
+
+Wait 30-60 seconds for initialization.
+
+### Verify Services Are Running
+
+```bash
+docker compose ps
+```
+
+Expected output:
+```
+NAME            STATUS              PORTS
+tak-database    Up (healthy)        5432/tcp
+takserver       Up                  0.0.0.0:8089->8089/tcp, 0.0.0.0:8443-8444->8443-8444/tcp, ...
+```
+
+Check TAK Server logs:
+```bash
+docker compose logs takserver | tail -50
 ```
 
 ---
 
 ## Access Web Interface
 
-### Copy Admin Certificate
+### Import Admin Certificate
 
-```bash
-# Copy admin.p12 to your local machine
-# The certificate is at: ~/tak-certs/admin.p12
-# Password: atakatak
-```
-
-### Import Certificate to Browser
+The admin certificate is located at: `tak/certs/files/admin.p12`
+Password: `atakatak`
 
 **Firefox:**
+1. Settings → Privacy & Security → Certificates → View Certificates
+2. Your Certificates tab → Import
+3. Select `tak/certs/files/admin.p12`
+4. Enter password: `atakatak`
+5. **Restart Firefox**
 
-1. Open Firefox Settings
-2. Privacy & Security → Certificates → View Certificates
-3. Click "Your Certificates" tab
-4. Click "Import"
-5. Select `admin.p12`
-6. Enter password: **atakatak**
-7. Click OK
-8. **Restart Firefox**
+**Chrome/Edge:**
+1. Settings → Privacy and Security → Security → Manage certificates
+2. Your certificates tab → Import
+3. Select `admin.p12`
+4. Enter password: `atakatak`
+5. **Restart browser**
 
-**Chrome/Chromium:**
+**macOS:** The certificate may import to your system keychain. Ensure it's trusted:
+```bash
+# View certificate
+security find-identity -v -p codesigning
 
-1. Open Chrome Settings
-2. Privacy and Security → Security → Manage certificates
-3. Click "Your certificates" tab
-4. Click "Import"
-5. Select `admin.p12`
-6. Enter password: **atakatak**
-7. Click OK
-8. **Restart Chrome**
+# Trust certificate (if needed)
+security add-trusted-cert -d -r trustRoot -k ~/Library/Keychains/login.keychain-db tak/certs/files/admin.p12
+```
 
 ### Access Web UI
 
-1. Open your browser
-2. Navigate to: **https://localhost:8443** (or **https://YOUR_SERVER_IP:8443**)
-3. Accept the security warning (self-signed certificate)
+1. Open browser (must be restarted after certificate import)
+2. Navigate to: **https://localhost:8443**
+3. Accept security warning (self-signed certificate)
 4. When prompted, select the **admin** certificate
-5. You should now see the TAK Server web interface
+5. You should see the TAK Server web interface
 
-**Note:** The browser will ask you to select a certificate - choose the admin certificate you just imported.
-
----
-
-## Verify Server Status
-
-### Check Docker Containers
-
-```bash
-# View running containers
-docker compose ps
-
-# Expected output shows all containers healthy
-# NAME                STATUS              PORTS
-# tak-postgres        Up (healthy)        5432/tcp
-# tak-server          Up (healthy)        8089/tcp, 8443/tcp, ...
-```
-
-### Check TAK Server Services
-
-```bash
-# Check services inside container
-docker exec tak-server bash -c "ps aux | grep -i tak | grep -v grep"
-
-# Check listening ports
-docker exec tak-server netstat -tlnp
-
-# View logs
-docker compose logs --tail=50 tak-server
-```
-
-### Verify Ports are Accessible
-
-```bash
-# From host machine, check ports are listening
-sudo netstat -tlnp | grep -E ':(8089|8443|8444|8446)'
-
-# Or use ss command
-ss -tlnp | grep -E ':(8089|8443|8444|8446)'
-```
-
-Expected ports:
-- **8089** - TAK Server client connections (TLS)
-- **8443** - Web administration interface (HTTPS)
-- **8444** - Federation HTTPS
-- **8446** - Certificate enrollment port
-
-### Test Web Interface Access
-
-```bash
-# Test HTTPS connection (will show certificate error, but confirms server is listening)
-curl -k https://localhost:8443
-
-# Should return HTML content or certificate required message
-```
+**If using a remote server:**
+- Replace `localhost` with your server's IP address
+- Navigate to: `https://YOUR_SERVER_IP:8443`
 
 ---
 
@@ -421,323 +418,263 @@ curl -k https://localhost:8443
 
 ### Common Commands
 
-**Start all services:**
+**Start services:**
 ```bash
 docker compose up -d
 ```
 
-**Stop all services:**
+**Stop services:**
 ```bash
 docker compose down
 ```
 
 **Restart specific service:**
 ```bash
-docker compose restart tak-server
+docker compose restart takserver
 ```
 
 **View logs:**
 ```bash
-# Follow logs for all services
+# All services
 docker compose logs -f
 
-# Follow logs for specific service
-docker compose logs -f tak-server
+# Specific service
+docker compose logs -f takserver
 
-# View last 100 lines
-docker compose logs --tail=100 tak-server
+# Last 100 lines
+docker compose logs --tail=100 takserver
 ```
 
 **Access container shell:**
 ```bash
-# Access TAK Server container
-docker exec -it tak-server bash
-
-# Access PostgreSQL container
-docker exec -it tak-postgres bash
+docker exec -it takserver bash
 ```
 
-**View resource usage:**
+**Check resource usage:**
 ```bash
 docker stats
 ```
 
-**Stop and remove all data (WARNING - deletes everything!):**
+**Rebuild after configuration changes:**
 ```bash
-docker compose down -v
+docker compose up -d --build
 ```
 
 ---
 
 ## Troubleshooting
 
-### Container Won't Start
+### Services Won't Start
 
 **Check logs:**
 ```bash
-docker compose logs tak-server
-docker compose logs db
+docker compose logs
 ```
 
 **Common issues:**
 
-1. **Port already in use:**
-   ```bash
-   # Check what's using the port
-   sudo netstat -tlnp | grep 8443
+**1. Port already in use:**
+```bash
+# Check what's using port 8443
+sudo lsof -i :8443
+# or
+sudo netstat -tlnp | grep 8443
 
-   # Stop conflicting service or change port in docker-compose.yml
-   ```
+# Solution: Stop conflicting service or change port in docker-compose.yml
+```
 
-2. **Database not ready:**
-   ```bash
-   # Ensure PostgreSQL is healthy before starting TAK Server
-   docker compose up -d db
-   sleep 30
-   docker compose logs db
-   docker compose up -d tak-server
-   ```
+**2. Database connection errors:**
 
-3. **Permission errors:**
-   ```bash
-   # Fix permissions on volumes
-   sudo chown -R 1000:1000 ./db-data
-   sudo chown -R 1000:1000 ./certs
-   ```
+Verify database password matches in both `.env` and `tak/CoreConfig.xml`:
+```bash
+grep POSTGRES_PASSWORD .env
+grep password tak/CoreConfig.xml
+```
+
+They must match!
+
+**3. Database not ready:**
+```bash
+# Check database health
+docker compose ps
+
+# View database logs
+docker compose logs tak-database
+
+# Restart if needed
+docker compose restart tak-database
+sleep 10
+docker compose restart takserver
+```
 
 ### Cannot Access Web UI
 
-**Certificate not accepted:**
-
-1. Verify certificate is imported in browser
-2. Restart browser after importing certificate
+**Certificate not working:**
+1. Verify certificate imported in browser (check browser certificate manager)
+2. **Restart browser** after importing
 3. Clear browser cache and cookies
-4. Try a different browser (Firefox, Chrome)
-5. Ensure certificate password was entered correctly (atakatak)
+4. Try different browser
+5. Verify certificate password was correct: `atakatak`
 
 **Connection refused:**
-
 ```bash
-# Verify TAK Server is running
+# Verify services running
 docker compose ps
 
-# Check if port 8443 is listening
-docker exec tak-server netstat -tlnp | grep 8443
+# Check if port is listening
+docker exec takserver netstat -tlnp | grep 8443
 
-# Check firewall
+# Check firewall (Linux)
 sudo ufw status
 sudo ufw allow 8443/tcp
 ```
 
-**Certificate error `ERR_BAD_SSL_CLIENT_AUTH_CERT`:**
+**ERR_BAD_SSL_CLIENT_AUTH_CERT error:**
+This means the admin certificate isn't properly installed. Reimport the certificate and restart your browser.
 
-This means the admin certificate isn't installed. Follow the certificate import steps again and restart your browser.
+### Build Failures
 
-### Database Connection Errors
-
-**Reset database:**
+**Out of disk space:**
 ```bash
-# WARNING: This deletes all data!
-docker compose down
-docker volume rm tak-server-docker_db-data
-docker compose up -d db
-sleep 30
-docker compose run --rm tak-server /opt/tak/db-utils/takserver-setup-db.sh
-docker compose up -d
+# Clean up Docker
+docker system prune -a
+
+# Check disk space
+df -h
 ```
 
-**Check PostgreSQL:**
+**Network errors during build:**
 ```bash
-# Connect to database
-docker exec -it tak-postgres psql -U martiuser -d cot
-
-# List tables
-\dt
-
-# Exit
-\q
+# Retry build
+docker compose build --no-cache
 ```
 
-### Certificate Issues
+### Generate Additional Certificates
 
-**Regenerate all certificates:**
 ```bash
-# Access container
-docker exec -it tak-server bash
+# Access the certificate directory
+cd tak/certs
 
-# Backup existing certificates
-cd /opt/tak/certs
-mv files files.backup
-mkdir files
+# Set environment variables (if not already set)
+export STATE="California"
+export CITY="Sacramento"
+export ORGANIZATIONAL_UNIT="TAKServer"
 
-# Regenerate root CA and certificates
-./makeRootCa.sh
-./makeCert.sh server takserver
-./makeCert.sh client admin
+# Generate client certificate
+./makeCert.sh client username1
 
-exit
+# Generate server certificate
+./makeCert.sh server servername
 
-# Restart server
-docker compose restart tak-server
+# List generated certificates
+ls -la files/
 ```
 
-### View Detailed Logs
-
-**TAK Server logs inside container:**
-```bash
-# View main server log
-docker exec tak-server tail -f /opt/tak/logs/takserver.log
-
-# View messaging log
-docker exec tak-server tail -f /opt/tak/logs/takserver-messaging.log
-
-# View API log
-docker exec tak-server tail -f /opt/tak/logs/takserver-api.log
-
-# View all logs
-docker exec tak-server tail -f /opt/tak/logs/*.log
-```
+Certificates are created as `.p12` files with password: `atakatak`
 
 ---
 
 ## Backup and Restore
 
-### Backup
+### Create Backup Script
 
-Create a backup script (`backup.sh`):
+Create `backup.sh`:
 
 ```bash
 #!/bin/bash
 BACKUP_DIR="$HOME/tak-backups/backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-echo "Creating TAK Server backup in $BACKUP_DIR"
+echo "Creating TAK Server backup..."
 
-# Backup PostgreSQL database
-echo "Backing up database..."
-docker exec tak-postgres pg_dump -U martiuser cot > "$BACKUP_DIR/database.sql"
+# Backup database
+docker exec tak-database pg_dump -U postgres cot > "$BACKUP_DIR/database.sql"
 
 # Backup certificates
-echo "Backing up certificates..."
-docker cp tak-server:/opt/tak/certs/files "$BACKUP_DIR/certs"
+cp -r tak/certs/files "$BACKUP_DIR/certs"
 
 # Backup configuration
-echo "Backing up configuration..."
-docker cp tak-server:/opt/tak/CoreConfig.xml "$BACKUP_DIR/CoreConfig.xml"
-
-# Backup docker-compose and .env
+cp tak/CoreConfig.xml "$BACKUP_DIR/"
 cp docker-compose.yml "$BACKUP_DIR/"
 cp .env "$BACKUP_DIR/.env.backup"
 
-# Create compressed archive
-echo "Compressing backup..."
-tar -czf "$BACKUP_DIR.tar.gz" -C "$(dirname $BACKUP_DIR)" "$(basename $BACKUP_DIR)"
+# Compress
+tar -czf "$BACKUP_DIR.tar.gz" -C "$HOME/tak-backups" "$(basename $BACKUP_DIR)"
 rm -rf "$BACKUP_DIR"
 
-echo "Backup completed: $BACKUP_DIR.tar.gz"
+echo "Backup complete: $BACKUP_DIR.tar.gz"
 ```
 
-**Run backup:**
+Run backup:
 ```bash
 chmod +x backup.sh
 ./backup.sh
 ```
 
-### Restore
+### Restore from Backup
 
 ```bash
+# Stop services
+docker compose down
+
 # Extract backup
 tar -xzf backup-YYYYMMDD-HHMMSS.tar.gz
 
-# Stop TAK Server
-docker compose down
+# Start database
+docker compose up -d tak-database
+sleep 10
 
 # Restore database
-cat backup-YYYYMMDD-HHMMSS/database.sql | docker exec -i tak-postgres psql -U martiuser -d cot
-
-# Restore certificates
-docker cp backup-YYYYMMDD-HHMMSS/certs/. tak-server:/opt/tak/certs/files/
+cat backup-YYYYMMDD-HHMMSS/database.sql | docker exec -i tak-database psql -U postgres cot
 
 # Restore configuration
-docker cp backup-YYYYMMDD-HHMMSS/CoreConfig.xml tak-server:/opt/tak/CoreConfig.xml
+cp backup-YYYYMMDD-HHMMSS/CoreConfig.xml tak/
+cp -r backup-YYYYMMDD-HHMMSS/certs tak/certs/files
 
-# Restart services
+# Start services
 docker compose up -d
 
 # Verify
-docker compose logs -f tak-server
-```
-
-### Automated Backups with Cron
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add daily backup at 2 AM
-0 2 * * * /home/yourusername/tak-server-docker/backup.sh >> /home/yourusername/tak-backups/backup.log 2>&1
+docker compose logs -f
 ```
 
 ---
 
-## Production Considerations
+## Production Recommendations
 
-### Security Best Practices
+### Security
 
 1. **Change default passwords:**
-   ```bash
-   # Change PostgreSQL password in .env file
-   # Change certificate password by editing cert scripts before generation
-   ```
+   - Update `POSTGRES_PASSWORD` in `.env`
+   - Update password in `tak/CoreConfig.xml` to match
 
 2. **Configure firewall:**
    ```bash
-   # Allow only necessary ports
-   sudo ufw allow 8089/tcp
-   sudo ufw allow 8443/tcp
-   sudo ufw deny 5432/tcp  # Don't expose PostgreSQL to internet
+   sudo ufw allow 8089/tcp   # TAK client connections
+   sudo ufw allow 8443/tcp   # Web interface
    sudo ufw enable
    ```
 
-3. **Use strong certificates:**
-   - Generate unique certificates for each user
-   - Set certificate expiration appropriately
+3. **Use unique certificates:**
+   - Generate separate certificates for each user
+   - Never share certificate files
    - Revoke compromised certificates immediately
-
-4. **Enable HTTPS only:**
-   - Ensure all connections use TLS/SSL
-   - Disable any HTTP endpoints
 
 ### Performance Tuning
 
-**Increase Java heap size:**
+For high-load environments, increase memory in `.env`:
 
-Edit `docker-compose.yml`:
-```yaml
-services:
-  tak-server:
-    environment:
-      - JAVA_OPTS=-Xmx4096m -Xms2048m
+```bash
+CONFIG_MAX_HEAP=512
+MESSAGING_MAX_HEAP=2048
+API_MAX_HEAP=2048
+RETENTION_MAX_HEAP=512
 ```
 
-**Increase PostgreSQL resources:**
-
-Edit `docker-compose.yml`:
-```yaml
-services:
-  db:
-    environment:
-      POSTGRES_SHARED_BUFFERS: "256MB"
-      POSTGRES_WORK_MEM: "16MB"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-```
+Ensure your system has sufficient RAM.
 
 ### Monitoring
 
-**Health checks:**
 ```bash
 # Check container health
 docker compose ps
@@ -745,43 +682,39 @@ docker compose ps
 # Monitor resources
 docker stats
 
-# Set up alerts for container failures
+# View logs
+docker compose logs -f takserver
 ```
 
-**Log monitoring:**
-```bash
-# Use log aggregation tools like ELK Stack or Grafana Loki
-# Configure docker logging driver for centralized logging
-```
+Set up automated monitoring with tools like Prometheus and Grafana.
+
+---
+
+## Port Reference
+
+- **8443** - Web administration interface (HTTPS)
+- **8089** - TAK client connections (TLS)
+- **8444** - Federation HTTPS
+- **8446** - Certificate enrollment
+- **9000** - Federation
+- **9001** - Federation
 
 ---
 
 ## Additional Resources
 
 ### Official Documentation
-- TAK Server Documentation: https://tak.gov
-- TAK Community Forums: https://tak.gov/community
-- Docker Documentation: https://docs.docker.com
+- TAK Server: https://tak.gov
+- Docker: https://docs.docker.com
 
-### Related Guides in This Repository
+### Related Guides
 - [Complete Installation Tutorial](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md) - Bare metal installation
-- [Installation Guide](TAK_SERVER_5.5_INSTALLATION_GUIDE.md) - Alternative installation reference
 - [Federation Setup](FEDERATION_SETUP.md) - Connect multiple TAK Servers
+- [LDAP Setup](LDAP_SETUP_GUIDE.md) - LDAP authentication
 
 ---
 
-## Summary
-
-You now have TAK Server 5.5 running in Docker with:
-
-- ✅ Official TAK Server Docker distribution from tak.gov
-- ✅ PostgreSQL 15 database
-- ✅ Persistent data using Docker volumes
-- ✅ Certificate-based authentication
-- ✅ Web UI accessible on port 8443
-- ✅ Client connections on port 8089
-
-### Quick Reference
+## Quick Reference
 
 ```bash
 # Start services
@@ -791,31 +724,34 @@ docker compose up -d
 docker compose down
 
 # View logs
-docker compose logs -f tak-server
-
-# Access container
-docker exec -it tak-server bash
+docker compose logs -f takserver
 
 # Restart
-docker compose restart tak-server
+docker compose restart takserver
 
-# Backup
-./backup.sh
+# Access container
+docker exec -it takserver bash
 
 # Check status
 docker compose ps
+
+# Backup
+./backup.sh
 ```
 
 ---
 
-## License
+## License & Disclaimer
 
 This guide is provided as-is for educational purposes. TAK Server software is subject to its own licensing terms from tak.gov.
 
-## Disclaimer
+**TAK Server is U.S. Government software.** All TAK Server components must be obtained from official sources (tak.gov).
 
-This is an unofficial community guide. For official support:
-- Official documentation: https://tak.gov
-- TAK.gov community forums: https://tak.gov/community
+For official support:
+- Documentation: https://tak.gov
+- Community forums: https://tak.gov/community
 
-TAK Server is government software. All TAK Server components must be obtained from official sources (tak.gov).
+---
+
+**Last Updated:** November 2025
+**TAK Server Version:** 5.5-RELEASE-58
