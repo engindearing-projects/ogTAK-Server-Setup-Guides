@@ -308,21 +308,112 @@ You should see `admin.p12`, `ca.pem`, and server certificates.
 
 ## Configure Database Password
 
-⚠️ **Critical Step:** Update the CoreConfig.xml file with your database password.
+⚠️ **Critical Step:** The CoreConfig.xml file must be configured with your database settings before starting TAK Server.
+
+### Check if CoreConfig.xml Exists
+
+```bash
+ls -la tak/CoreConfig.xml
+```
+
+**If the file exists**, open it and check if it has content:
+```bash
+cat tak/CoreConfig.xml
+```
+
+### If CoreConfig.xml is Missing or Empty
+
+The official TAK Server Docker package may include a minimal or empty CoreConfig.xml. If your file is missing, empty, or doesn't contain the `<connection>` section, create it using this template:
 
 ```bash
 nano tak/CoreConfig.xml
 ```
 
-Find this line (around line 16):
+**Copy and paste this complete CoreConfig.xml template:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration xmlns="http://bbn.com/marti/xml/config">
+
+    <!-- Database Connection - CRITICAL: Update password to match your .env file -->
+    <repository>
+        <connection url="jdbc:postgresql://tak-database:5432/cot" username="martiuser" password="atakatak"/>
+    </repository>
+
+    <!-- Network Configuration -->
+    <network>
+        <input name="stdssl" protocol="tls" port="8089" auth="x509"/>
+        <connector port="8443" tls="true" clientAuth="true"/>
+        <connector port="8444" tls="true" clientAuth="false"/>
+        <connector port="8446" tls="true" clientAuth="false"/>
+    </network>
+
+    <!-- Security Settings -->
+    <security>
+        <tls keystore="JKS" keystoreFile="/opt/tak/certs/files/takserver.jks" keystorePass="atakatak"
+             truststore="JKS" truststoreFile="/opt/tak/certs/files/truststore-root.jks" truststorePass="atakatak"
+             context="TLSv1.2,TLSv1.3"/>
+    </security>
+
+    <!-- Authentication -->
+    <auth>
+        <File location="UserAuthenticationFile.xml"/>
+    </auth>
+
+    <!-- Federation (optional - uncomment to enable) -->
+    <!--
+    <federation>
+        <federation-server port="9000" keyManagerType="JKS"/>
+    </federation>
+    -->
+
+    <!-- Submission Service -->
+    <submission/>
+
+    <!-- Subscription Service -->
+    <subscription/>
+
+    <!-- Buffer Configuration -->
+    <buffer>
+        <latestSA enable="true"/>
+    </buffer>
+
+</Configuration>
+```
+
+Save the file (Ctrl+O, Enter, Ctrl+X in nano).
+
+### If CoreConfig.xml Already Has Content
+
+If your CoreConfig.xml file exists and has content, you just need to find and update the database password.
+
+```bash
+nano tak/CoreConfig.xml
+```
+
+Look for the `<connection>` line (usually within a `<repository>` section):
 ```xml
 <connection url="jdbc:postgresql://tak-database:5432/cot" username="martiuser" password=""/>
 ```
 
-**Change it to** (use the same password as in your `.env` file):
+**Change the password** to match your `.env` file (default is `atakatak`):
 ```xml
 <connection url="jdbc:postgresql://tak-database:5432/cot" username="martiuser" password="atakatak"/>
 ```
+
+### Verify Configuration
+
+After creating or editing CoreConfig.xml, verify the database password matches your `.env` file:
+
+```bash
+# Check password in .env
+grep POSTGRES_PASSWORD .env
+
+# Check password in CoreConfig.xml
+grep password tak/CoreConfig.xml
+```
+
+Both passwords **must match** for the server to connect to the database.
 
 Save and exit.
 
