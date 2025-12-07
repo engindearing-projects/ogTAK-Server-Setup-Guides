@@ -846,3 +846,492 @@ For official support:
 
 **Last Updated:** November 2025
 **TAK Server Version:** 5.5-RELEASE-58
+# TAK Server Docker Guide - Section Updates
+
+## Updates to Existing Sections
+
+These updates fix GUI access issues and add proper client package configuration. Insert/replace in the existing TAK_SERVER_DOCKER_GUIDE.md.
+
+---
+
+## UPDATE 1: Troubleshooting Section - Add After Line 625
+
+### API Service Won't Start
+
+**Symptoms:**
+- GUI returns "site can't be reached" or connection timeout
+- No response on ports 8443 or 8446
+- Container shows "unhealthy" status
+
+**Diagnosis:**
+```bash
+# Check if API service is running inside container
+docker exec takserver ps aux | grep "api.*java"
+
+# Check API service logs
+docker exec takserver cat /opt/tak/logs/takserver-api.log
+
+# Look for this specific error:
+docker exec takserver grep "FAILED TO START" /opt/tak/logs/takserver-api.log
+```
+
+**Common Error:**
+```
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Failed to bind properties under 'server.ssl.client-auth'
+Value: "false"
+Reason: No enum constant org.springframework.boot.web.server.Ssl.ClientAuth.false
+
+Action:
+
+Update your application's configuration. The following values are valid:
+    NEED
+    NONE
+    WANT
+```
+
+**Root Cause:**
+Invalid `clientAuth` attribute in `CoreConfig.xml`. TAK Server 5.5 does NOT accept `clientAuth="false"` - it must be removed entirely or set to valid enum values.
+
+**Solution:**
+```bash
+# Edit CoreConfig.xml
+vim tak/CoreConfig.xml
+
+# Find these lines and REMOVE the clientAuth attributes:
+# BEFORE (INCORRECT):
+# <connector port="8443" clientAuth="false" _name="https"/>
+# <connector port="8446" clientAuth="false" _name="cert_https"/>
+
+# AFTER (CORRECT):
+# <connector port="8443" _name="https"/>
+# <connector port="8446" _name="cert_https"/>
+
+# Restart TAK Server
+docker restart takserver
+
+# Wait for services to start (60 seconds)
+sleep 60
+
+# Verify API service started
+docker exec takserver ps aux | grep api
+```
+
+### Database Schema Not Initialized
+
+**Symptoms:**
+- GUI accessible but shows errors
+- API log shows database errors
+- "relation does not exist" errors in logs
+
+**Diagnosis:**
+```bash
+# Check for database schema errors
+docker logs takserver 2>&1 | grep "relation.*does not exist"
+
+# Common error:
+# ERROR: relation "client_endpoint" does not exist
+```
+
+**Solution:**
+
+TAK Server should auto-initialize the database on first startup. If schema is missing:
+
+```bash
+# Stop TAK Server
+docker stop takserver
+
+# Remove and recreate database volume (WARNING: Deletes all data!)
+docker volume rm takserver-docker_tak-db-data
+
+# Restart database first
+docker compose up -d tak-database
+
+# Wait for database to be fully ready
+sleep 15
+
+# Start TAK Server
+docker compose up -d takserver
+
+# Monitor initialization
+docker logs takserver --follow
+
+# Wait for all services to report "Started" status
+# This takes 60-90 seconds
+```
+
+**Verify Schema Created:**
+```bash
+# Check if tables exist
+docker exec tak-database psql -U martiuser -d cot -c "\dt" | grep client_endpoint
+```
+
+### "Site Can't Be Reached" - Complete Diagnostic
+
+**Full troubleshooting workflow:**
+
+```bash
+# 1. Verify container is running
+docker ps --filter name=takserver
+
+# 2. Check if ports are exposed
+docker port takserver
+
+# 3. Test localhost connection
+timeout 5 curl -k -I https://localhost:8443/
+
+# Expected responses:
+# - "bad certificate" = Good! Server is running, needs client cert
+# - "SSL_ERROR_SYSCALL" = API service not bound to port
+# - "Connection refused" = Service not running
+# - "Connection timed out" = Firewall/network issue
+
+# 4. Check API service status inside container
+docker exec takserver netstat -tlnp | grep -E "(8443|8446)"
+
+# Should show:
+# tcp 0 0 0.0.0.0:8443 0.0.0.0:* LISTEN 11/java
+# tcp 0 0 0.0.0.0:8446 0.0.0.0:* LISTEN 11/java
+
+# 5. If ports aren't listening, check API logs
+docker exec takserver tail -100 /opt/tak/logs/takserver-api.log
+
+# 6. If no log file or very small, API never started
+docker logs takserver 2>&1 | grep -i "api.*started\|api.*error"
+```
+
+---
+
+## UPDATE 2: New Section - Add After "Access Web Interface" Section
+
+## Client Package Generation
+
+### Understanding TAK Client Authentication
+
+TAK clients (ATAK/iTAK) support two authentication methods:
+1. **Certificate-only** - Client authenticated by X.509 certificate alone
+2. **Certificate + Username/Password** - Certificate for TLS, username for identification
+
+For multi-user deployments, method #2 is recommended as it allows unique user identification while sharing certificates.
+
+### Configure Username/Password Authentication
+
+**1. Edit UserAuthenticationFile.xml**
+
+```bash
+vim tak/UserAuthenticationFile.xml
+```
+
+Add users:
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<UserAuthenticationFile xmlns="http://bbn.com/marti/xml/bindings">
+    <User identifier="admin" password="atakatak" passwordHashed="false"/>
+
+    <!-- Android Users -->
+    <User identifier="android1" password="atakatak" passwordHashed="false"/>
+    <User identifier="android2" password="atakatak" passwordHashed="false"/>
+    <User identifier="android3" password="atakatak" passwordHashed="false"/>
+
+    <!-- iPhone Users -->
+    <User identifier="iphone1" password="atakatak" passwordHashed="false"/>
+    <User identifier="iphone2" password="atakatak" passwordHashed="false"/>
+    <User identifier="iphone3" password="atakatak" passwordHashed="false"/>
+</UserAuthenticationFile>
+```
+
+**2. Update CoreConfig.xml to enable file-based authentication**
+
+Verify this section exists in `tak/CoreConfig.xml`:
+```xml
+<auth>
+    <File location="UserAuthenticationFile.xml"/>
+</auth>
+```
+
+**3. Restart TAK Server**
+```bash
+docker restart takserver
+sleep 30
+```
+
+### Create Client Data Packages
+
+**1. Create directory structure**
+```bash
+mkdir -p client-packages/{android,iphone}
+```
+
+**2. Copy certificates**
+```bash
+# Android
+cp tak/certs/files/android.p12 client-packages/android/
+cp tak/certs/files/ca.pem client-packages/android/
+cp tak/certs/files/truststore-root.p12 client-packages/android/
+
+# iPhone
+cp tak/certs/files/iphone.p12 client-packages/iphone/
+cp tak/certs/files/ca.pem client-packages/iphone/
+cp tak/certs/files/truststore-root.p12 client-packages/iphone/
+```
+
+**3. Create server connection preference files**
+
+**For Android** - Create `client-packages/android/server-connection.pref`:
+```xml
+<?xml version='1.0' standalone='yes'?>
+<preferences>
+  <preference version="1" name="cot_streams">
+    <entry key="count" class="class java.lang.Integer">1</entry>
+    <entry key="description0" class="class java.lang.String">TAK Server</entry>
+    <entry key="enabled0" class="class java.lang.Boolean">true</entry>
+    <entry key="connectString0" class="class java.lang.String">YOUR_SERVER_IP:8089:ssl</entry>
+    <entry key="useAuth0" class="class java.lang.Boolean">true</entry>
+    <entry key="enrollForCertificateWithTrust0" class="class java.lang.Boolean">false</entry>
+  </preference>
+  <preference version="1" name="com.atakmap.app_preferences">
+    <entry key="displayServerConnectionWidget" class="class java.lang.Boolean">true</entry>
+    <entry key="caLocation" class="class java.lang.String">/storage/emulated/0/atak/cert/ca.pem</entry>
+    <entry key="caPassword" class="class java.lang.String">atakatak</entry>
+    <entry key="certificateLocation" class="class java.lang.String">/storage/emulated/0/atak/cert/android.p12</entry>
+    <entry key="clientPassword" class="class java.lang.String">atakatak</entry>
+  </preference>
+</preferences>
+```
+
+**For iPhone** - Create `client-packages/iphone/server-connection.pref`:
+```xml
+<?xml version='1.0' standalone='yes'?>
+<preferences>
+  <preference version="1" name="cot_streams">
+    <entry key="count" class="class java.lang.Integer">1</entry>
+    <entry key="description0" class="class java.lang.String">TAK Server</entry>
+    <entry key="enabled0" class="class java.lang.Boolean">true</entry>
+    <entry key="connectString0" class="class java.lang.String">YOUR_SERVER_IP:8089:ssl</entry>
+    <entry key="useAuth0" class="class java.lang.Boolean">true</entry>
+    <entry key="enrollForCertificateWithTrust0" class="class java.lang.Boolean">false</entry>
+  </preference>
+  <preference version="1" name="com.atakmap.app_preferences">
+    <entry key="displayServerConnectionWidget" class="class java.lang.Boolean">true</entry>
+    <entry key="caLocation" class="class java.lang.String">ca.pem</entry>
+    <entry key="caPassword" class="class java.lang.String">atakatak</entry>
+    <entry key="certificateLocation" class="class java.lang.String">iphone.p12</entry>
+    <entry key="clientPassword" class="class java.lang.String">atakatak</entry>
+  </preference>
+</preferences>
+```
+
+⚠️ **CRITICAL:** Replace `YOUR_SERVER_IP` with your actual server IP or domain name!
+
+⚠️ **IMPORTANT:** The `useAuth0` flag is **required** for username/password authentication. Without it, clients will only attempt certificate-based auth and username/password fields will be ignored.
+
+**4. Create manifest files**
+
+**Android manifest** - Create `client-packages/android/manifest.xml`:
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<MissionPackageManifest version="2">
+   <Configuration>
+      <Parameter name="name" value="Android TAK Client Package"/>
+      <Parameter name="onReceiveDelete" value="true"/>
+   </Configuration>
+   <Contents>
+      <Content ignore="false" zipEntry="android.p12"/>
+      <Content ignore="false" zipEntry="truststore-root.p12"/>
+      <Content ignore="false" zipEntry="server-connection.pref"/>
+      <Content ignore="false" zipEntry="ca.pem"/>
+   </Contents>
+</MissionPackageManifest>
+```
+
+**iPhone manifest** - Create `client-packages/iphone/manifest.xml`:
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<MissionPackageManifest version="2">
+   <Configuration>
+      <Parameter name="name" value="iPhone TAK Client Package"/>
+      <Parameter name="onReceiveDelete" value="true"/>
+   </Configuration>
+   <Contents>
+      <Content ignore="false" zipEntry="iphone.p12"/>
+      <Content ignore="false" zipEntry="truststore-root.p12"/>
+      <Content ignore="false" zipEntry="server-connection.pref"/>
+      <Content ignore="false" zipEntry="ca.pem"/>
+   </Contents>
+</MissionPackageManifest>
+```
+
+**5. Create data package ZIP files**
+
+```bash
+# Android CONFIG package
+cd client-packages/android
+zip android_CONFIG.zip android.p12 truststore-root.p12 ca.pem manifest.xml server-connection.pref
+cd ../..
+
+# iPhone CONFIG package
+cd client-packages/iphone
+zip iphone_CONFIG.zip iphone.p12 truststore-root.p12 ca.pem manifest.xml server-connection.pref
+cd ../..
+
+# Create distribution packages
+cd client-packages
+zip -r android-distribution.zip android/
+zip -r iphone-distribution.zip iphone/
+cd ..
+```
+
+**6. Verify packages created**
+```bash
+ls -lh client-packages/*.zip
+ls -lh client-packages/*/*.zip
+
+# Should show:
+# android-distribution.zip
+# iphone-distribution.zip
+# android/android_CONFIG.zip
+# iphone/iphone_CONFIG.zip
+```
+
+### Client Setup Instructions
+
+**Android (ATAK):**
+1. Install ATAK from Google Play or https://tak.gov
+2. Transfer `android_CONFIG.zip` to Android device
+3. In ATAK: Menu → Import → Import Data Package
+4. Select `android_CONFIG.zip`
+5. Go to Settings → Network Connections
+6. Edit "TAK Server" connection
+7. Enter username: `android1` (must be unique per user!)
+8. Enter password: `atakatak`
+9. Enable connection
+10. Verify green connection indicator
+
+**iPhone (iTAK):**
+1. Install iTAK from App Store
+2. Email `iphone_CONFIG.zip` to yourself or AirDrop
+3. Open file on iPhone - iTAK imports automatically
+4. In iTAK → Settings → Servers
+5. Edit "TAK Server" connection
+6. Enter username: `iphone1` (must be unique per user!)
+7. Enter password: `atakatak`
+8. Enable connection
+9. Verify connected status
+
+### Testing User-to-User Visibility
+
+**Verify users can see each other:**
+
+1. **User 1** (android1): Connect and drop a marker
+2. **User 2** (android2 or iphone1): Connect
+3. User 2 should see User 1's marker within 2-3 seconds
+4. Both users should see each other in Active Contacts list
+
+**If users can't see each other:**
+
+```bash
+# Check server logs for connections
+docker logs takserver --tail 50 --follow
+
+# Look for authentication messages
+docker logs takserver 2>&1 | grep -i "auth\|login"
+
+# Verify users are in same team/group (default: __ANON__)
+# In ATAK/iTAK → Settings → Self SA → Team
+```
+
+Common issues:
+- **Same username used by multiple users** - Each user MUST have unique username
+- **Different teams** - All users must be on same team
+- **CoT filters blocking** - Disable filters for testing
+- **useAuth0 flag missing** - Clients won't send username/password
+
+---
+
+## UPDATE 3: Add to "Generate Additional Certificates" Section (Line 643)
+
+### Multi-User Certificate Strategy
+
+For deployments with multiple users:
+
+**Option 1: Shared Certificate + Unique Usernames (Recommended)**
+- All Android users share `android.p12`
+- All iPhone users share `iphone.p12`
+- Each user has unique username (android1, android2, iphone1, iphone2, etc.)
+- Advantages: Simple distribution, easy management
+- Disadvantages: Can't revoke individual users
+
+**Option 2: Individual Certificates Per User**
+```bash
+# Generate certificates for each user
+cd tak/certs
+
+# Android users
+./makeCert.sh client user1-android
+./makeCert.sh client user2-android
+./makeCert.sh client user3-android
+
+# iPhone users
+./makeCert.sh client user1-iphone
+./makeCert.sh client user2-iphone
+
+# Certificates created in tak/certs/files/
+ls -lh files/*.p12
+```
+
+Then create individual data packages for each user with their specific certificate.
+
+---
+
+## UPDATE 4: Add to "Production Recommendations" Section
+
+### Client Distribution
+
+1. **Use file sharing for large deployments:**
+   ```bash
+   # Upload packages to secure file sharing
+   # Examples: Google Drive, Dropbox, OneDrive, S3
+   ```
+
+2. **Provide setup instructions:**
+   - Include PDF/markdown instructions with packages
+   - List assigned usernames
+   - Provide troubleshooting contact
+
+3. **Test before deployment:**
+   - Verify at least 2 clients can connect
+   - Confirm users see each other
+   - Test marker and chat functionality
+
+4. **Monitor connections:**
+   ```bash
+   # Check active connections
+   docker exec takserver netstat -an | grep 8089 | grep ESTABLISHED | wc -l
+
+   # View TAK Server logs
+   docker logs takserver --follow
+   ```
+
+---
+
+## Summary of Critical Fixes
+
+1. **clientAuth attribute** - Must be removed from CoreConfig.xml (TAK 5.5 doesn't accept "false")
+2. **useAuth0 flag** - Required in server-connection.pref for username/password auth
+3. **Unique usernames** - Each user must have different username to appear separately
+4. **Database schema** - Auto-initializes on first run; recreate volume if corrupted
+5. **Certificate passwords** - Default is `atakatak` for all generated certificates
+
+---
+
+## Version History
+
+- **v1.2** - Added GUI troubleshooting and client package generation
+- **v1.1** - Initial Docker guide
+- **v1.0** - Base installation guide
+
