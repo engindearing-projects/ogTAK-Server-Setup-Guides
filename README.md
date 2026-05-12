@@ -1,295 +1,176 @@
-# TAK Server 5.5 Installation and Federation Guides
+# ogTAK Server Setup Guides
 
-Complete guides for installing and configuring TAK Server 5.5 on Ubuntu 24.04 LTS, including federation setup.
+Practical, tested install guides for **TAK Server 5.5, 5.6, and 5.7** on Ubuntu 24.04 LTS — including federation, LDAP, Docker, and an end-to-end smoke test using OmniTAK.
 
-## Important Gotchas / Known Issues
+> Latest TAK Server upstream tags (TAK-Product-Center/Server, April 2026):
+> - **5.7-RELEASE-14** — newest, includes WebTAK 4.10.5 and major messaging perf wins
+> - **5.6-RELEASE-35** — current stable
+> - **5.5-RELEASE-82** — long-term stable; 5.5-RELEASE-58 (the original target of these guides) is superseded
 
-### Critical: PostgreSQL Version MUST be 15
-
-**Ubuntu 24.04 may try to install PostgreSQL 16 by default, which will cause TAK Server to fail!**
-
-- TAK Server 5.5 **requires PostgreSQL 15** specifically
-- Ubuntu 24.04's default apt repository often provides PostgreSQL 16
-- Using PostgreSQL 16 will cause database connection errors and server failures
-- **Solution**: You MUST explicitly specify PostgreSQL 15 during installation using the PostgreSQL APT repository
-
-See the [PostgreSQL Installation section](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md#postgresql-15-installation) in the tutorial for the correct installation commands.
-
-### Critical: OpenJDK 17 is REQUIRED
-
-**Do NOT remove OpenJDK 17 completely!**
-
-- The TAK Server .deb package has dependencies on OpenJDK 17 packages
-- While we use Temurin JDK 17 as the runtime, the OpenJDK 17 packages must be installed to satisfy dependencies
-- Removing OpenJDK 17 will cause the .deb installation to fail
-- **Solution**: Install both Temurin JDK 17 (for runtime) AND OpenJDK 17 packages (for dependencies)
-
-The tutorial correctly shows installing both - follow it as written.
-
-### Critical: Federation Hub is Separate Package
-
-**Federation requires a separate Federation Hub package!**
-
-- Federation Hub is **NOT** included in the main TAK Server package
-- You must download `takserver-fed-hub_5.5-RELEASE58_all.deb` separately from tak.gov
-- Federation Hub scripts need PATH fixes for Ubuntu 24.04 (full paths to `/usr/bin/awk` and `/usr/bin/java`)
-- See [FEDERATION_SETUP.md](FEDERATION_SETUP.md) for complete details
+Pick the version that matches the `.deb` you downloaded from [tak.gov](https://tak.gov).
 
 ---
 
-## Overview
+## Which guide should I use?
 
-This repository contains step-by-step installation and configuration guides for:
-- TAK Server 5.5 installation on Ubuntu 24.04
-- Federation Hub setup and configuration
-- Federation with OpenTAKServer or other TAK servers
+| You want to... | Read this |
+|---|---|
+| Install the newest TAK Server | [TAK_SERVER_5.7_COMPLETE_TUTORIAL.md](TAK_SERVER_5.7_COMPLETE_TUTORIAL.md) |
+| Install current stable | [TAK_SERVER_5.6_COMPLETE_TUTORIAL.md](TAK_SERVER_5.6_COMPLETE_TUTORIAL.md) |
+| Install 5.5 (legacy) | [TAK_SERVER_5.5_COMPLETE_TUTORIAL.md](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md) |
+| Run TAK Server in Docker | [TAK_SERVER_DOCKER_GUIDE.md](TAK_SERVER_DOCKER_GUIDE.md) |
+| 5.7-on-Docker deltas vs the 5.5 guide (Colima, `.zip` package, `martiuser`, etc.) | [TAK_5.7_DOCKER_DELTAS.md](TAK_5.7_DOCKER_DELTAS.md) |
+| Build a one-tap `.zip` data package for sim / emulator / phone | [TAK_5.7_DATA_PACKAGE_GUIDE.md](TAK_5.7_DATA_PACKAGE_GUIDE.md) |
+| Federate to OpenTAKServer / another TAK Server | [FEDERATION_SETUP.md](FEDERATION_SETUP.md) |
+| Wire up OpenLDAP / Active Directory auth | [LDAP_SETUP_GUIDE.md](LDAP_SETUP_GUIDE.md) |
+| Smoke-test the install with a real client | [OMNITAK_TEST_GUIDE.md](OMNITAK_TEST_GUIDE.md) |
 
-**Tested On:**
-- Ubuntu 24.04.3 LTS (Noble Numbat)
-- TAK Server 5.5-RELEASE-58
-- TAK Server Federation Hub 5.5-RELEASE-58
+---
 
-## Prerequisites
+## The same gotchas apply across 5.5 / 5.6 / 5.7
 
-Before starting, you need to:
-1. Download TAK Server packages from https://tak.gov (requires registration)
-   - `takserver_5.5-RELEASE58_all.deb`
-   - `takserver-fed-hub_5.5-RELEASE58_all.deb` (for federation)
-2. Ubuntu 24.04 LTS system with:
-   - Minimum 8GB RAM
-   - 40GB+ disk space
-   - Internet connection
-   - sudo access
+These bite on every fresh Ubuntu 24.04 install. None of them have been fixed upstream because they're really Ubuntu/packaging quirks, not TAK Server bugs:
 
-**Important:** This repository does not include any TAK Server SDK files, packages, or proprietary software. All TAK Server components must be downloaded directly from tak.gov.
+### 1. PostgreSQL MUST be version 15
 
-## Guides
+- TAK Server 5.5/5.6/5.7 all pin to **PostgreSQL 15** (verified in source — `requires('postgresql-15')`, `requires('postgresql-15-postgis-3')`)
+- Ubuntu 24.04's default `apt install postgresql` installs **16**, which breaks TAK Server with cryptic DB errors
+- Install 15 explicitly from the PGDG APT repo (every guide above shows the steps)
 
-### 1. TAK Server Installation
+### 2. Keep OpenJDK 17 installed alongside Temurin
 
-**[TAK_SERVER_5.5_COMPLETE_TUTORIAL.md](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md)**
-- Complete step-by-step installation guide
-- Covers Java 17, PostgreSQL 15, TAK Server 5.5
-- Certificate generation and configuration
-- Firewall setup
-- Troubleshooting common issues
+- The TAK Server `.deb` declares `requires('openjdk-17-jdk')` — don't remove it
+- Run Temurin 17 as the runtime AND keep OpenJDK 17 to satisfy the package dependency
+- Removing OpenJDK 17 will fail your `dpkg -i`
 
-**[TAK_SERVER_5.5_INSTALLATION_GUIDE.md](TAK_SERVER_5.5_INSTALLATION_GUIDE.md)**
-- Alternative installation reference
-- Quick reference for experienced users
+### 3. Federation Hub is a separate `.deb`
 
-### 2. Docker Installation
+- `takserver-fed-hub_<version>_all.deb` — separate download from tak.gov
+- The fed-hub scripts need PATH fixes for Ubuntu 24.04 (full paths to `/usr/bin/awk` and `/usr/bin/java`)
+- See [FEDERATION_SETUP.md](FEDERATION_SETUP.md)
 
-**[TAK_SERVER_DOCKER_GUIDE.md](TAK_SERVER_DOCKER_GUIDE.md)**
-- Complete Docker installation and setup guide
-- Docker Compose configuration
-- Container-based deployment with persistent data
-- Certificate generation in containers
-- Federation in Docker
-- Production considerations and best practices
+### 4. Re-apply launcher-script PATH fixes after every `dpkg -i`
 
-### 3. Federation Setup
+- `dpkg` overwrites `/opt/tak/setenv.sh`, `takserver-messaging.sh`, etc.
+- Each tutorial's "Fix Startup Scripts" section is the same fix — re-run it on upgrade
 
-**[FEDERATION_SETUP.md](FEDERATION_SETUP.md)**
-- Complete Federation Hub installation guide
-- Certificate configuration for federation
-- Connecting to OpenTAKServer or other TAK servers
-- Troubleshooting federation issues
-- Key gotchas and common pitfalls
+---
 
-## Quick Start
+## Version-specific notes
 
-**Read the gotchas above first** - they will save you hours of troubleshooting!
+### What's new in 5.7
+- **WebTAK 4.10.5** — performance overhaul, scales to ~2800 clients on c5.2xlarge
+- **takproto over UDP** inputs (previously TCP/TLS only) — useful for Meshtastic/LoRa gateways
+- **Optional broadcast filter** to prevent specific users from broadcasting map items
+- **Websocket compression off by default** for performance — re-enable in `CoreConfig.xml` if you need it for low-bandwidth clients
 
-Choose the guide that fits your needs:
+### What changed in 5.6 (vs 5.5)
+- Spring Security bumped to 6.5.9 — re-test custom OAuth/SSO config
+- Apache Commons Codec 1.15 → 1.17.1
+- Spring LDAP 3.1.6 → 3.2.0 — re-test custom LDAP/AD bind
+- `commons-beanutils` no longer pulled in by core
+- OS deps unchanged (Java 17, PostgreSQL 15)
 
-1. **[Complete Tutorial](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md)** - Step-by-step installation with all commands
-   - Best for: First-time installers
-   - Includes: Exact commands, verification steps, troubleshooting
-   - Time: 1-2 hours
+### 5.5 baseline
+- See [TAK_SERVER_5.5_COMPLETE_TUTORIAL.md](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md)
 
-2. **[Installation Guide](TAK_SERVER_5.5_INSTALLATION_GUIDE.md)** - Comprehensive guide with detailed explanations
-   - Best for: Understanding the architecture and configuration
-   - Includes: Detailed explanations, certificate setup, advanced configuration
-   - Time: 2-3 hours
+---
 
-3. **[Docker Installation Guide](TAK_SERVER_DOCKER_GUIDE.md)** - Complete Docker containerized deployment
-   - Best for: Container-based deployments, development environments, easy setup
-   - Includes: Dockerfile, Docker Compose, persistent volumes, production considerations
-   - Time: 1-2 hours
+## Tested environments
 
-4. **[Federation Setup](FEDERATION_SETUP.md)** - Complete Federation Hub setup guide
-   - Best for: Connecting to OpenTAKServer or other TAK servers
-   - Includes: Certificate trust, firewall config, troubleshooting, key gotchas
-   - Time: 30-60 minutes
+- **OS**: Ubuntu 24.04.3 LTS (Noble Numbat)
+- **Java**: Eclipse Temurin 17.0.16 + OpenJDK 17 (both required)
+- **PostgreSQL**: 15.x with PostGIS 3
+- **TAK Server**: 5.5-RELEASE-82, 5.6-RELEASE-35, 5.7-RELEASE-14
+- **Federation Hub**: matching `<version>-RELEASE-<n>` to the server
+- **Clients**: OmniTAK-Android (Kotlin/Compose), OmniTAK-iOS (Swift/SwiftUI), ATAK 5.5+, WinTAK
 
-## Installation Commands
+---
 
-1. **Install TAK Server** (follow complete tutorial first):
-   ```bash
-   # See TAK_SERVER_5.5_COMPLETE_TUTORIAL.md for full steps
-   sudo dpkg -i takserver_5.5-RELEASE58_all.deb
-   ```
+## Port reference (all versions)
 
-2. **Install Federation Hub** (if federating with other servers):
-   ```bash
-   # See FEDERATION_SETUP.md for complete instructions
-   sudo dpkg -i takserver-fed-hub_5.5-RELEASE58_all.deb
-   ```
-
-3. **Access TAK Server**:
-   - Web UI: `https://YOUR_SERVER_IP:8443`
-   - Federation UI: `https://YOUR_SERVER_IP:9100`
-
-## Post-Installation Verification
-
-### Verify TAK Server Status
-
-Check that all TAK Server services are running:
-
-```bash
-# Check main services
-sudo systemctl status takserver-messaging.service
-sudo systemctl status takserver-api.service
-
-# Verify all TAK components
-sudo systemctl list-units --type=service --all | grep -i tak
-
-# Check running processes
-ps aux | grep -i tak | grep -v grep
-
-# Verify listening ports
-sudo netstat -tlnp | grep -E ':(8089|8443|8444|8446)'
-```
-
-Expected output should show:
-- takserver-messaging.service: active
-- takserver-api.service: active
-- Ports 8089, 8443, 8444, 8446 listening
-
-### Access Web Interface
-
-TAK Server requires a client certificate for web access. The admin certificate is generated during installation.
-
-**Copy Admin Certificate:**
-
-```bash
-# Copy certificate to home directory
-sudo cp /opt/tak/certs/files/admin.p12 ~/admin.p12
-sudo chown $USER:$USER ~/admin.p12
-```
-
-**Import Certificate to Browser:**
-
-Firefox:
-1. Settings → Privacy & Security → Certificates → View Certificates
-2. "Your Certificates" tab → Import
-3. Select `admin.p12`
-4. Password: `atakatak` (default)
-5. Restart browser
-
-Chrome/Chromium:
-1. Settings → Privacy and Security → Security → Manage certificates
-2. "Your certificates" → Import
-3. Select `admin.p12`
-4. Password: `atakatak` (default)
-5. Restart browser
-
-**Access Web UI:**
-
-Navigate to `https://localhost:8443` or `https://YOUR_SERVER_IP:8443`
-
-When prompted, select the `admin` certificate to authenticate.
-
-## Key Components
-
-### TAK Server Ports
+### TAK Server core
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 8089 | TCP/TLS | TAK Server client connections |
-| 8443 | HTTPS | Web administration interface |
-| 8444 | HTTPS | Federation HTTPS (with cert) |
-| 8446 | HTTPS | Certificate-based HTTPS |
-| 6969 | UDP | Multicast (SA awareness) |
+| 5432 | TCP | PostgreSQL 15 |
+| 8089 | TCP/TLS | Client connections (ATAK / WinTAK / OmniTAK) |
+| 8443 | TCP/HTTPS | Web admin / WebTAK (client cert required) |
+| 8444 | TCP/HTTPS | Federation HTTPS |
+| 8446 | TCP/HTTPS | Certificate enrollment |
+| 6969 | UDP | Multicast SA discovery |
 
-### Federation Hub Ports
+### Federation Hub
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 9000 | TCP/TLS | Federation V1 server port |
-| 9001 | TCP/TLS | Federation V2 server port |
+| 9000 | TCP/TLS | Federation V1 (legacy) |
+| 9001 | TCP/TLS | Federation V2 server |
 | 9100 | HTTPS | Federation Hub web UI |
-| 9101 | TCP/TLS | Federation Hub V1 broker |
-| 9102 | TCP/TLS | Federation Hub V2 broker |
+| 9101 | TCP/TLS | Fed Hub V1 broker |
+| 9102 | TCP/TLS | Fed Hub V2 broker |
 
-## Important Notes
+---
 
-### Security
+## Quick start
 
-- **Never commit certificates or private keys to version control**
-- Default passwords should be changed in production
-- Certificates in this repo's `.gitignore` are excluded for security
-- Review firewall rules before exposing to internet
+1. Download the TAK Server `.deb` from [tak.gov](https://tak.gov) (registration required)
+2. Read the gotchas above
+3. Follow the matching `TAK_SERVER_5.X_COMPLETE_TUTORIAL.md` top-to-bottom
+4. Verify with [OMNITAK_TEST_GUIDE.md](OMNITAK_TEST_GUIDE.md)
+5. Optionally add federation, LDAP, or Docker
 
-### Package Downloads
+Time budget: 1–2 hours for a clean install on a fresh VM, plus 15 minutes for the OmniTAK smoke test.
 
-All TAK Server packages must be downloaded from:
-- https://tak.gov
+---
 
-Registration is required. We cannot distribute TAK Server software.
+## Security notes
 
-### Federation
+- Default cert password is `atakatak` — change `cert-metadata.sh` (`CAPASS=` and `PASS=`) **before** running `makeRootCa.sh`
+- Database password `takserver123` in the tutorials is a placeholder — replace it before exposing the server
+- Never commit certificates or private keys
+- Review firewall rules before exposing the server to the internet
+- For production, consider running behind a reverse proxy and fronting it with proper CA-issued certs (the self-signed CA is fine for internal use)
 
-- Federation Hub is a **separate package** from TAK Server
-- Both servers must trust each other's certificates
-- Firewall must allow inbound connections on federation ports
-- See FEDERATION_SETUP.md for complete details and gotchas
+---
 
-## Troubleshooting
+## Package downloads
 
-### Common Issues
+All TAK Server packages must be downloaded from [tak.gov](https://tak.gov) (free registration). This repo cannot redistribute them.
 
-1. **Java version conflicts**: TAK Server 5.5 requires Java 17
-2. **PostgreSQL connection**: Verify PostgreSQL 15 is running
-3. **Certificate issues**: Regenerate certificates if expired
-4. **Federation not connecting**: Check firewall, certificates, and port configuration
+You'll typically need:
 
-See individual guides for detailed troubleshooting steps.
+| Filename pattern | Purpose |
+|---|---|
+| `takserver_5.X-RELEASE<n>_all.deb` | Main server |
+| `takserver-fed-hub_5.X-RELEASE<n>_all.deb` | Federation Hub (optional) |
+| `takserver-docker-5.X-RELEASE-<n>.tar.gz` | Docker bundle (optional) |
 
-## Directory Structure
-
-```
-.
-├── README.md                                    # This file
-├── TAK_SERVER_5.5_COMPLETE_TUTORIAL.md         # Full installation guide
-├── TAK_SERVER_5.5_INSTALLATION_GUIDE.md        # Alternative reference
-├── TAK_SERVER_DOCKER_GUIDE.md                  # Docker installation guide
-├── FEDERATION_SETUP.md                          # Federation guide
-└── .gitignore                                   # Security exclusions
-```
+---
 
 ## Contributing
 
-Issues, corrections, and improvements are welcome. Please ensure:
-- No sensitive data (certificates, keys, passwords) is included
-- Commands are tested on Ubuntu 24.04
-- Documentation is clear and step-by-step
+Issues, corrections, and improvements welcome. Please ensure:
+- No sensitive data (certificates, keys, passwords)
+- Commands tested on Ubuntu 24.04 (or the OS you're documenting)
+- Steps are concrete and reproducible
+
+---
 
 ## Disclaimer
 
 This is an unofficial community guide. For official TAK Server documentation and support:
-- Official documentation: https://tak.gov
-- TAK.gov community forums: https://tak.gov/community
+- https://tak.gov
+- https://tak.gov/community
+- https://github.com/TAK-Product-Center/Server
 
-TAK Server is government software. All TAK Server components and packages must be obtained from official sources.
+TAK Server is government software. All packages must be obtained from official sources.
 
-## License
+---
 
-These guides are provided as-is for educational purposes. TAK Server software is subject to its own licensing terms from tak.gov.
+## Version history
 
-## Version History
-
-- **v1.2** - Added Docker installation and setup guide with Docker Compose
-- **v1.1** - Added Federation Hub setup guide with detailed gotchas
-- **v1.0** - Initial TAK Server 5.5 installation guide for Ubuntu 24.04
+- **v2.0** — Added 5.6 + 5.7 install guides, OmniTAK end-to-end smoke test, refreshed README
+- **v1.2** — Added Docker installation guide
+- **v1.1** — Added Federation Hub setup with detailed gotchas
+- **v1.0** — Initial 5.5 install guide for Ubuntu 24.04
