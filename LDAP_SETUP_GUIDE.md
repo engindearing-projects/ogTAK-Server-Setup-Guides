@@ -263,16 +263,117 @@ docker exec openldap ldapwhoami -x -D "cn=john.doe,ou=people,dc=tak,dc=local" -w
 
 ### ATAK/WinTAK/iTAK Settings
 
-When connecting a TAK client:
+LDAP replaces the **client** certificate (no more per-user `.p12`), but
+the client still needs to **trust the server's TLS cert** on 8089.
+Without the server CA in the client's truststore, ATAK will refuse the
+connection with:
 
-1. **Server Address**: YOUR_SERVER_IP
-2. **Port**: 8089
-3. **Protocol**: TLS
-4. **Authentication**: Username/Password
-5. **Username**: `john.doe`
-6. **Password**: `password123`
+> Connection Error: Please re-import your truststore certificate
 
-No certificate needed - LDAP handles authentication.
+So every client needs `truststore-root.p12` regardless of LDAP. Two
+ways to deliver it:
+
+#### Option A — Manual truststore import (fastest for one device)
+
+On the TAK server host, grab the server's CA:
+
+```bash
+# For the 5.7 docker bundle:
+ls takserver-docker-5.7-RELEASE-*/tak/certs/files/truststore-root.p12
+
+# Or pull it out of the running container:
+docker cp takserver:/opt/tak/certs/files/truststore-root.p12 ./truststore-root.p12
+```
+
+Transfer `truststore-root.p12` to the phone (AirDrop, email, USB).
+Default password: `atakatak`.
+
+On ATAK:
+
+1. Settings → **Network Preferences** → **Manage Server Connections** → tap **+**
+2. **Server URL**: `YOUR_SERVER_IP:8089:ssl` (use the LAN IP — not `localhost`)
+3. Tick **Use Authentication** → Username `john.doe` / Password `password123`
+4. **Truststore** → Select File → pick the `truststore-root.p12` you copied → password `atakatak`
+5. Leave **Client Certificate** empty (this is what makes it LDAP-mode rather than mTLS)
+6. Save and toggle the connection on
+
+If it still trips on trust, delete the saved connection and re-add —
+ATAK caches a bad handshake.
+
+#### Option B — One-click data package (preferred for fleet rollout)
+
+Build a Mission Package zip that drops the truststore and a connection
+pref onto the device in one import. On the TAK server host:
+
+```bash
+mkdir -p ldap-package/MANIFEST ldap-package/certs
+
+# manifest
+cat > ldap-package/MANIFEST/manifest.xml <<'EOF'
+<MissionPackageManifest version="2">
+  <Configuration>
+    <Parameter name="uid" value="REPLACE-WITH-UUID"/>
+    <Parameter name="name" value="TAK_LDAP"/>
+    <Parameter name="onReceiveDelete" value="true"/>
+  </Configuration>
+  <Contents>
+    <Content ignore="false" zipEntry="certs/server.pref"/>
+    <Content ignore="false" zipEntry="certs/truststore-root.p12"/>
+  </Contents>
+</MissionPackageManifest>
+EOF
+
+sed -i "s|REPLACE-WITH-UUID|$(uuidgen)|" ldap-package/MANIFEST/manifest.xml
+
+# connection prefs — replace YOUR.SERVER.IP with the LAN IP of the TAK host
+cat > ldap-package/certs/server.pref <<'EOF'
+<?xml version="1.0" encoding="ASCII" standalone="yes"?>
+<preferences>
+  <preference version="1" name="cot_streams">
+    <entry key="count" class="class java.lang.Integer">1</entry>
+    <entry key="description0" class="class java.lang.String">TAK_LDAP</entry>
+    <entry key="enabled0" class="class java.lang.Boolean">true</entry>
+    <entry key="connectString0" class="class java.lang.String">YOUR.SERVER.IP:8089:ssl</entry>
+    <entry key="useAuth0" class="class java.lang.Boolean">true</entry>
+  </preference>
+  <preference version="1" name="com.atakmap.app_preferences">
+    <entry key="displayServerConnectionWidget" class="class java.lang.Boolean">true</entry>
+    <entry key="caLocation" class="class java.lang.String">cert/truststore-root.p12</entry>
+    <entry key="caPassword" class="class java.lang.String">atakatak</entry>
+  </preference>
+</preferences>
+EOF
+
+cp takserver-docker-5.7-RELEASE-*/tak/certs/files/truststore-root.p12 ldap-package/certs/
+
+cd ldap-package && zip -r ../tak-ldap.zip MANIFEST certs && cd ..
+```
+
+Notes on the package:
+
+- The `cert/` vs `certs/` mismatch in `server.pref` is intentional —
+  ATAK normalises the singular path on import. Don't "fix" it.
+- No `certificateLocation` / `clientPassword` entries — that's what
+  makes this an LDAP/password package rather than mTLS.
+- `useAuth0=true` tells ATAK to prompt for username/password on first
+  connect.
+
+Drop `tak-ldap.zip` onto the phone (Downloads folder works). In ATAK →
+**Import Manager** → **Local SD** → select the zip. It installs the
+truststore and the server entry in one step, then prompts for
+credentials when you enable the stream.
+
+#### Connection settings (both options)
+
+| Field | Value |
+|---|---|
+| Server Address | LAN IP of the TAK host (not `localhost`) |
+| Port | `8089` |
+| Protocol | TLS |
+| Truststore | `truststore-root.p12` (password `atakatak`) |
+| Client Cert | *(leave empty — LDAP mode)* |
+| Username | `john.doe` |
+| Password | `password123` |
 
 ## Docker Commands
 
@@ -305,6 +406,24 @@ ldapsearch -x -H ldap://localhost:389 -b "dc=tak,dc=local" -D "cn=admin,dc=tak,d
 # Test user authentication
 docker exec openldap ldapwhoami -x -D "cn=john.doe,ou=people,dc=tak,dc=local" -w password123
 ```
+
+### ATAK error: "Please re-import your truststore certificate"
+
+The client doesn't trust the server's TLS cert on 8089. LDAP only
+replaces the **client** certificate — every device still needs
+`truststore-root.p12` (the server CA) installed. See the
+[TAK Client Configuration](#tak-clientwintakitak-settings) section
+for the two ways to deliver it. Common causes once a truststore is
+installed:
+
+- Wrong truststore — exported from a different TAK server / CA than
+  the one currently running. Re-export from
+  `tak/certs/files/truststore-root.p12` on the live server.
+- Server cert was regenerated (`makeRootCa.sh` re-run) and the
+  truststore on the device is now from the old CA. Re-export and
+  re-import.
+- A stale connection entry in ATAK is caching the previous handshake.
+  Delete the server entry in **Manage Server Connections** and re-add.
 
 ### TAK Server LDAP Issues
 
