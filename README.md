@@ -19,6 +19,8 @@ Pick the version that matches the `.deb` you downloaded from [tak.gov](https://t
 | Install current stable | [TAK_SERVER_5.6_COMPLETE_TUTORIAL.md](TAK_SERVER_5.6_COMPLETE_TUTORIAL.md) |
 | Install 5.5 (legacy) | [TAK_SERVER_5.5_COMPLETE_TUTORIAL.md](TAK_SERVER_5.5_COMPLETE_TUTORIAL.md) |
 | Run TAK Server in Docker | [TAK_SERVER_DOCKER_GUIDE.md](TAK_SERVER_DOCKER_GUIDE.md) |
+| 5.7-on-Docker deltas vs the 5.5 guide (Colima, `.zip` package, `martiuser`, etc.) | [TAK_5.7_DOCKER_DELTAS.md](TAK_5.7_DOCKER_DELTAS.md) |
+| Build a one-tap `.zip` data package for sim / emulator / phone | [TAK_5.7_DATA_PACKAGE_GUIDE.md](TAK_5.7_DATA_PACKAGE_GUIDE.md) |
 | Federate to OpenTAKServer / another TAK Server | [FEDERATION_SETUP.md](FEDERATION_SETUP.md) |
 | Wire up OpenLDAP / Active Directory auth | [LDAP_SETUP_GUIDE.md](LDAP_SETUP_GUIDE.md) |
 | Smoke-test the install with a real client | [OMNITAK_TEST_GUIDE.md](OMNITAK_TEST_GUIDE.md) |

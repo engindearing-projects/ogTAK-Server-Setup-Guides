@@ -89,6 +89,8 @@ Add a small `manifest.xml` if you want OmniTAK to auto-prefill the connection se
 
 Where `server.pref` is a TAK preferences file pointing at your server. iOS OmniTAK imports `.zip` packages via Files / AirDrop / iCloud Drive (see the [OmniTAK-iOS README](https://github.com/engindearing-projects/OmniTAK-iOS#getting-started)).
 
+For a complete walkthrough — full `MANIFEST/manifest.xml` schema, the `server.pref` `cot_streams` block, and **per-context connect strings** (iOS Simulator uses `localhost:8089:ssl`, Android emulator needs `10.0.2.2:8089:ssl`, real phone on LAN uses the host's LAN IP) — see [TAK_5.7_DATA_PACKAGE_GUIDE.md](TAK_5.7_DATA_PACKAGE_GUIDE.md). It also covers the `cert/` vs `certs/` path-mismatch gotcha and the per-device cert convention (`engie-test` / `engie-android` / `engie-phone`) that lets all three connect simultaneously without UID collisions.
+
 ### C — CSR enrollment over port 8446 (no manual cert transfer)
 
 If you set up CSR enrollment in `CoreConfig.xml`, the OmniTAK clients can request their own certificate from the server using a username/password. Both Android and iOS clients support this — point them at `https://YOUR_SERVER_IP:8446` in **Settings → TAK Servers → Enroll**.
