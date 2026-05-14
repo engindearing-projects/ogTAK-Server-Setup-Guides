@@ -8,8 +8,10 @@ This guide shows how to set up OpenLDAP in Docker for TAK Server authentication,
 
 ## Prerequisites
 
-- TAK Server 5.5 installed and running
+- TAK Server 5.5 or later installed and running (validated against 5.7-RELEASE-8)
 - Docker and Docker Compose installed
+- `ldap-utils` installed on the host if you plan to run the host-side
+  `ldapsearch` troubleshooting commands: `sudo apt install ldap-utils`
 - Ubuntu 24.04 LTS (or similar Linux distribution)
 
 ## Quick Start
@@ -100,20 +102,11 @@ dn: ou=groups,dc=tak,dc=local
 objectClass: organizationalUnit
 ou: groups
 
-# Create Groups
-dn: cn=tak-users,ou=groups,dc=tak,dc=local
-objectClass: groupOfNames
-cn: tak-users
-description: TAK Users Group
-member: cn=admin,dc=tak,dc=local
-
-dn: cn=tak-admins,ou=groups,dc=tak,dc=local
-objectClass: groupOfNames
-cn: tak-admins
-description: TAK Administrators Group
-member: cn=admin,dc=tak,dc=local
-
-# Create Users
+# Create Users — defined before the groups so the group member
+# references point at real entries. (LDAP doesn't enforce
+# referential integrity, so out-of-order would still import, but a
+# group whose only member is a non-existent DN is a footgun once
+# TAK Server's group sync starts resolving members.)
 dn: cn=john.doe,ou=people,dc=tak,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
@@ -145,6 +138,20 @@ loginShell: /bin/bash
 mail: jane.smith@tak.local
 userPassword: password123
 description: TAK Administrator - Jane Smith
+
+# Create Groups — groupOfNames requires at least one member, so
+# each group is seeded with a real user from ou=people above.
+dn: cn=tak-users,ou=groups,dc=tak,dc=local
+objectClass: groupOfNames
+cn: tak-users
+description: TAK Users Group
+member: cn=john.doe,ou=people,dc=tak,dc=local
+
+dn: cn=tak-admins,ou=groups,dc=tak,dc=local
+objectClass: groupOfNames
+cn: tak-admins
+description: TAK Administrators Group
+member: cn=jane.smith,ou=people,dc=tak,dc=local
 ```
 
 ### 4. Start OpenLDAP
@@ -427,18 +434,25 @@ installed:
 
 ### TAK Server LDAP Issues
 
-1. **Check TAK Server logs:**
+1. **Check TAK Server logs:** In the Docker TAK Server deployment the
+   logs live *inside* the `takserver` container, not on the host —
+   `sudo tail /opt/tak/logs/...` on the host won't find them. Use:
    ```bash
-   sudo tail -f /opt/tak/logs/takserver-messaging.log | grep -i ldap
-   sudo tail -f /opt/tak/logs/takserver-api.log | grep -i ldap
+   docker exec takserver tail -f /opt/tak/logs/takserver-messaging.log | grep -i ldap
+   docker exec takserver tail -f /opt/tak/logs/takserver-api.log | grep -i ldap
    ```
+   (For a bare-metal / non-Docker TAK Server install, the host paths
+   `sudo tail -f /opt/tak/logs/...` apply instead.)
 
 2. **Verify LDAP is running:**
    ```bash
    docker compose ps
    ```
 
-3. **Test from TAK Server host:**
+3. **Test from TAK Server host:** requires `ldap-utils` on the host
+   (`sudo apt install ldap-utils`). If you'd rather not install it,
+   run the same query inside the container with
+   `docker exec openldap ldapsearch ...`.
    ```bash
    ldapsearch -x -H ldap://localhost:389 -b "dc=tak,dc=local" -D "cn=admin,dc=tak,dc=local" -w admin123
    ```
@@ -457,32 +471,48 @@ docker compose up -d
 ### Backup LDAP Data
 
 ```bash
-# Backup all entries
-docker exec openldap slapcat -v -l ~/ldap-backup-$(date +%Y%m%d).ldif
+# Backup all entries.
+# NOTE: write slapcat's output to a path INSIDE the container, then
+# copy it out. `slapcat -l ~/file` would expand `~` on the *host*
+# shell before docker sees it, producing a host path the container
+# can't write to.
+docker exec openldap slapcat -l /tmp/ldap-backup.ldif
+docker cp openldap:/tmp/ldap-backup.ldif ~/ldap-backup-$(date +%Y%m%d).ldif
 
-# Backup specific OU
+# Backup specific OU — here the `>` redirect runs on the host shell,
+# so `~` resolves correctly to your host home directory.
 docker exec openldap ldapsearch -x -b "ou=people,dc=tak,dc=local" -D "cn=admin,dc=tak,dc=local" -w admin123 > ~/ldap-users-backup-$(date +%Y%m%d).ldif
 ```
 
 ### Restore LDAP Data
 
-```bash
-# Stop OpenLDAP
-docker compose down
+`slapadd` writes directly to the mdb backend files and must run with
+**slapd stopped** — running it against a live directory can corrupt
+the database. The osixia image runs slapd as its entrypoint, so the
+restore is done via a one-shot container with the entrypoint
+overridden:
 
-# Clear old data
+```bash
+# Stop OpenLDAP and clear the old data volume
+docker compose down
 docker volume rm openldap-data
 
-# Start fresh
+# Recreate the (empty) data volume and copy the backup into a
+# one-shot container that does NOT start slapd
 docker compose up -d
-sleep 10
+docker compose stop openldap
+docker cp ~/ldap-backup-YYYYMMDD.ldif openldap:/tmp/restore.ldif
 
-# Restore from backup
-docker exec -i openldap slapadd < ~/ldap-backup-YYYYMMDD.ldif
+# Run slapadd with slapd stopped (entrypoint bypassed)
+docker exec openldap slapadd -l /tmp/restore.ldif
 
-# Restart
-docker compose restart openldap
+# Bring slapd back up
+docker compose start openldap
 ```
+
+If `slapadd` complains the database is non-empty, the volume wasn't
+cleared — re-run `docker volume rm openldap-data` after
+`docker compose down`.
 
 ## Security Considerations
 
@@ -612,4 +642,6 @@ For issues:
 
 **Status**: Development/Testing Setup
 **Security Level**: Low (change passwords for production!)
-**Tested On**: Ubuntu 24.04 LTS with TAK Server 5.5-RELEASE-58
+**Tested On**: Ubuntu 24.04 LTS with TAK Server 5.5-RELEASE-58; LDAP
+commands re-validated against TAK Server 5.7-RELEASE-8 + osixia/openldap
+1.5.0 on 2026-05-14
